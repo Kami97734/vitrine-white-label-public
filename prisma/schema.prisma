@@ -1,0 +1,292 @@
+// Prisma schema - PostgreSQL (Supabase/Neon)
+// NextAuth + Produtos, Categorias e Preços
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========== NextAuth (um usuário por email - sem logins duplicados) ==========
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}
+
+// ========== Catálogo ==========
+model Category {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  title     String
+  products  Product[]
+  menuItems MenuItem[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Product {
+  id            String    @id @default(cuid())
+  code          String?   // código do produto (único para import/edição rápida)
+  name          String
+  description   String    // obrigatório com validação mínima
+  image         String    // imagem principal
+  images        String?   // JSON array de URLs para fotos extras
+  unitQuantity  Int       @default(1) // quantidade/unidades do produto (obrigatório no form)
+  unitMeasure   String    @default("un") // unidade de medida (ex.: un, kg, g, L, m)
+  costPrice     Float     @default(0) // preço de custo para gestão de margem
+  sku           String    @default("") // código padrão (obrigatório no form)
+  barcode       String?   // código de barras opcional
+  stock         Int       @default(-1) // -1 = sem controle, 0 = sem estoque, >0 = quantidade
+  categoryId    String
+  category      Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  prices        Price[]
+  orderItems    OrderItem[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  @@unique([code])
+}
+
+// Tabela de preços (histórico + preço atual = último registro)
+model Price {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  value       Float    // preço atual
+  oldValue    Float?   // preço anterior (para exibir desconto)
+  effectiveAt DateTime @default(now())
+}
+
+// ========== Admin ==========
+model Admin {
+  id             String         @id @default(cuid())
+  email          String         @unique
+  passwordHash   String
+  setupCompleted Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  logs           AdminLog[]
+  otpCodes       AdminOtpCode[]
+}
+
+// Códigos OTP para login do admin (hash no banco, nunca em texto puro)
+model AdminOtpCode {
+  id        String   @id @default(cuid())
+  email     String
+  codeHash  String   // hash bcrypt do código de 6 dígitos
+  expiresAt DateTime // expira em 10 minutos
+  used      Boolean  @default(false)
+  attempts  Int      @default(0) // tentativas erradas neste código
+  adminId   String?
+  admin     Admin?   @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+// ========== Painel: Banners, Home, Config ==========
+model Banner {
+  id        String   @id @default(cuid())
+  title     String
+  imageUrl  String
+  linkUrl   String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model HomeContent {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   // texto ou JSON
+  updatedAt DateTime @updatedAt
+}
+
+model SiteSettings {
+  id               String   @id @default(cuid())
+  siteName         String   @default("Demo Store")
+  siteTagline      String   @default("Vitrine virtual para apresentar produtos e receber pedidos por WhatsApp.")
+  primaryColor     String   @default("#0c87b8")
+  secondaryColor   String   @default("#0f172a")
+  accentColor      String   @default("#f97316")
+  whatsappColor    String   @default("#22c55e")
+  saleColor        String   @default("#f97316")
+  whatsappNumber   String   @default("") // número cru para wa.me
+  phoneDisplay     String   @default("") // texto exibido no rodapé
+  city             String   @default("Sua cidade - UF")
+  addressLine      String   @default("Rua Exemplo, 123 - Centro")
+  hoursWeekdays    String   @default("Seg a Sex: 08:00 - 18:00")
+  hoursSaturday    String   @default("Sáb: 08:00 - 12:00")
+  hoursSunday      String   @default("Dom: fechado")
+  facebookUrl      String?  @default("")
+  instagramUrl     String?  @default("")
+  tiktokUrl        String?  @default("")
+  youtubeUrl       String?  @default("")
+  linkedinUrl      String?  @default("")
+  xUrl             String?  @default("")
+  customSocials    String?  @default("[]") // JSON array [{label,url,icon}]
+  logoUrl          String?  @default("")
+  faviconUrl       String?  @default("")
+  heroWhatsappText String?  @default("Olá! Quero fazer um pedido. Vi o catálogo da {siteName} e quero comprar.")
+  fabWhatsappText  String?  @default("Olá! Quero fazer um pedido ou tirar dúvidas sobre os produtos da {siteName}.")
+  ctaPrimaryText   String?  @default("Fazer pedido no WhatsApp")
+  ctaSecondaryText String?  @default("Ver Ofertas")
+  ctaSecondaryUrl  String?  @default("#ofertas")
+  heroCarouselEnabled Boolean @default(false)
+  promoSectionTitle    String?  @default("Ofertas Imperdíveis")
+  promoSectionSubtitle String?  @default("Aproveite nossos preços especiais")
+  seoTitle         String?  @default("Catálogo de Produtos | Vitrine Virtual")
+  seoDescription   String?  @default("Vitrine virtual para apresentar catálogos de produtos com preços, ofertas e pedidos por WhatsApp.")
+  seoOgImageUrl    String?  @default("/og-image.png")
+  seoBaseUrl       String?  @default("https://example.com")
+  themePreset      String   @default("default")
+  adminPanelTitle  String?  @default("Painel Admin")
+  adminPanelSubtitle String? @default("Gerencie catálogo, vitrine e configurações.")
+  adminLogoUrl     String?  @default("")
+  language         String   @default("pt-BR")
+  cartEnabled      Boolean  @default(true)
+  aiProvider       String   @default("groq")
+  aiApiKey         String   @default("")
+  aiModel          String   @default("")
+  aiTemperature    Float    @default(0.7)
+  aiMaxTokens      Int      @default(1024)
+  aiChatEnabled    Boolean  @default(false)
+  aiDescribeEnabled Boolean @default(true)
+  aiRecommendEnabled Boolean @default(false)
+  updatedAt        DateTime @updatedAt
+}
+
+model AdminLog {
+  id        String   @id @default(cuid())
+  adminId   String?
+  admin     Admin?   @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  action    String
+  entityType String?
+  entityId   String?
+  result     String? // success, failed, warning
+  source     String?
+  correlationId String?
+  beforeData String?
+  afterData  String?
+  details   String?
+  ip        String?
+  userAgent String?
+  method    String?
+  path      String?
+  createdAt DateTime @default(now())
+}
+
+model Coupon {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  discount   Float    // percentual (ex.: 10 = 10%)
+  minValue   Float    @default(0) // valor mínimo do carrinho
+  maxUses    Int      @default(0) // 0 = ilimitado
+  usedCount  Int      @default(0)
+  expiresAt  DateTime?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ========== Navegação, Home dinâmica, Pedidos e APIs externas ==========
+
+model MenuItem {
+  id          String    @id @default(cuid())
+  label       String
+  slugOrUrl   String
+  position    String    @default("header") // header, footer, both, etc.
+  order       Int       @default(0)
+  visible     Boolean   @default(true)
+  targetType  String    @default("url") // url, category, static_page
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model HomeSection {
+  id        String   @id @default(cuid())
+  key       String   @unique // ex.: hero_title, hero_subtitle, about_block
+  type      String   @default("text") // text, richtext, json, image, etc.
+  value     String   // texto ou JSON
+  sortOrder Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id             String      @id @default(cuid())
+  customerName   String
+  customerPhone  String
+  customerEmail  String?
+  channel        String      @default("whatsapp") // whatsapp, site, loja_fisica, etc.
+  status         String      @default("pending")  // pending, confirmed, cancelled, paid
+  totalAmount    Float
+  notes          String?
+  items          OrderItem[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model OrderItem {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantity   Int
+  unitPrice  Float
+  createdAt  DateTime @default(now())
+}
+
+model ApiClient {
+  id          String   @id @default(cuid())
+  name        String
+  apiKeyHash  String   @unique
+  scopes      String   // JSON array de escopos: [\"read:catalog\", \"write:orders\"]
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
